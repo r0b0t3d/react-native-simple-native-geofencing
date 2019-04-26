@@ -3,44 +3,38 @@ package com.simplegeofencing.reactnative;
 
 import android.annotation.SuppressLint;
 import android.app.AlarmManager;
-import android.app.NotificationManager;
 import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
-import android.graphics.BitmapFactory;
 import android.os.Build;
-import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
-//import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 
 import com.facebook.react.HeadlessJsTaskService;
+import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
-import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
-import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.google.android.gms.location.Geofence;
+import com.google.android.gms.location.GeofencingClient;
 import com.google.android.gms.location.GeofencingRequest;
 import com.google.android.gms.location.LocationServices;
-import com.google.android.gms.location.GeofencingClient;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
-
 
 import java.util.ArrayList;
 import java.util.List;
 
-import static java.lang.Math.toIntExact;
+//import android.support.v4.app.NotificationCompat;
 
 public class RNSimpleNativeGeofencingModule extends ReactContextBaseJavaModule {
   private GeofencingClient mGeofencingClient;
@@ -181,16 +175,16 @@ public class RNSimpleNativeGeofencingModule extends ReactContextBaseJavaModule {
   @ReactMethod
   public void addGeofence(ReadableMap geofenceObject, int duration) {
     mGeofenceList.add(new Geofence.Builder()
-      .setRequestId(geofenceObject.getString("key"))
-      .setCircularRegion(
-        geofenceObject.getDouble("latitude"),
-        geofenceObject.getDouble("longitude"),
-        geofenceObject.getInt("radius")
-      )
-      .setExpirationDuration(duration)
-      .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER |
-        Geofence.GEOFENCE_TRANSITION_EXIT)
-      .build());
+            .setRequestId(geofenceObject.getString("key"))
+            .setCircularRegion(
+                    geofenceObject.getDouble("latitude"),
+                    geofenceObject.getDouble("longitude"),
+                    geofenceObject.getInt("radius")
+            )
+            .setExpirationDuration(duration)
+            .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER |
+                    Geofence.GEOFENCE_TRANSITION_EXIT)
+            .build());
 
     if(geofenceObject.hasKey("value")){
       geofenceKeys.add(geofenceObject.getString("key"));
@@ -206,46 +200,46 @@ public class RNSimpleNativeGeofencingModule extends ReactContextBaseJavaModule {
     //Context removed by Listeners
     //if (ContextCompat.checkSelfPermission(this.reactContext, Manifest.permission.ACCESS_FINE_LOCATION)
     //        != PackageManager.PERMISSION_GRANTED){
-      mGeofencingClient.addGeofences(getGeofencingRequest(), getGeofencePendingIntent())
-        .addOnSuccessListener(new OnSuccessListener<Void>() {
-          @Override
-          public void onSuccess(Void aVoid) {
-            Log.i(TAG, "Added Geofences");
-            notifyNow("start");
-            mStartTime = System.currentTimeMillis();
-            mLocalBroadcastManager.registerReceiver(
-                    mLocalBroadcastReceiver, new IntentFilter("outOfMonitorGeofence"));
+    mGeofencingClient.addGeofences(getGeofencingRequest(), getGeofencePendingIntent())
+            .addOnSuccessListener(new OnSuccessListener<Void>() {
+              @Override
+              public void onSuccess(Void aVoid) {
+                Log.i(TAG, "Added Geofences");
+                notifyNow("start");
+                mStartTime = System.currentTimeMillis();
+                mLocalBroadcastManager.registerReceiver(
+                        mLocalBroadcastReceiver, new IntentFilter("outOfMonitorGeofence"));
 
-            //Launch service to notify after timeout
-            if(notifyStop == true){
-              Intent notificationIntent = new Intent(reactContext, ShowTimeoutNotification.class);
-              notificationIntent.putExtra("notifyChannelStringTitle", notifyChannelString[0]);
-              notificationIntent.putExtra("notifyChannelStringDescription", notifyChannelString[1]);
-              notificationIntent.putExtra("notifyStringTitle", notifyStopString[0]);
-              notificationIntent.putExtra("notifyStringDescription", notifyStopString[1]);
+                //Launch service to notify after timeout
+                if(notifyStop == true){
+                  Intent notificationIntent = new Intent(reactContext, ShowTimeoutNotification.class);
+                  notificationIntent.putExtra("notifyChannelStringTitle", notifyChannelString[0]);
+                  notificationIntent.putExtra("notifyChannelStringDescription", notifyChannelString[1]);
+                  notificationIntent.putExtra("notifyStringTitle", notifyStopString[0]);
+                  notificationIntent.putExtra("notifyStringDescription", notifyStopString[1]);
 
-              PendingIntent contentIntent = PendingIntent.getService(reactContext, 0, notificationIntent,
-                      PendingIntent.FLAG_CANCEL_CURRENT);
+                  PendingIntent contentIntent = PendingIntent.getService(reactContext, 0, notificationIntent,
+                          PendingIntent.FLAG_CANCEL_CURRENT);
 
-              AlarmManager am = (AlarmManager) reactContext.getSystemService(Context.ALARM_SERVICE);
-              am.cancel(contentIntent);
-              if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.M){
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis()+mDuration, contentIntent);
-              }else{
-                am.setExact(AlarmManager.RTC_WAKEUP, System.currentTimeMillis()+mDuration, contentIntent);
+                  AlarmManager am = (AlarmManager) reactContext.getSystemService(Context.ALARM_SERVICE);
+                  am.cancel(contentIntent);
+                  if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.M){
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis()+mDuration, contentIntent);
+                  }else{
+                    am.setExact(AlarmManager.RTC_WAKEUP, System.currentTimeMillis()+mDuration, contentIntent);
+                  }
+
+                }
+
               }
-
-            }
-
-          }
-        })
-        .addOnFailureListener(new OnFailureListener() {
-          @Override
-          public void onFailure(@NonNull Exception e) {
-            failCallback.invoke(e.getMessage());
-            Log.e(TAG, "Adding Geofences: " + e.getMessage());
-          }
-        });
+            })
+            .addOnFailureListener(new OnFailureListener() {
+              @Override
+              public void onFailure(@NonNull Exception e) {
+                failCallback.invoke(e.getMessage());
+                Log.e(TAG, "Adding Geofences: " + e.getMessage());
+              }
+            });
     //}
 
   }
@@ -275,36 +269,36 @@ public class RNSimpleNativeGeofencingModule extends ReactContextBaseJavaModule {
   public void stopMonitoring() {
     //Context removed by Listeners
     mGeofencingClient.removeGeofences(getGeofencePendingIntent())
-      .addOnSuccessListener(new OnSuccessListener<Void>() {
-        @Override
-        public void onSuccess(Void aVoid) {
-          Log.i(TAG, "Removed Geofences");
+            .addOnSuccessListener(new OnSuccessListener<Void>() {
+              @Override
+              public void onSuccess(Void aVoid) {
+                Log.i(TAG, "Removed Geofences");
 
-          notifyNow("stop");
-          mLocalBroadcastManager.unregisterReceiver(mLocalBroadcastReceiver);
-          if(notifyStop == true){
-            Intent notificationIntent = new Intent(reactContext, ShowTimeoutNotification.class);
-            notificationIntent.putExtra("notifyChannelStringTitle", notifyChannelString[0]);
-            notificationIntent.putExtra("notifyChannelStringDescription", notifyChannelString[1]);
-            notificationIntent.putExtra("notifyStringTitle", notifyStopString[0]);
-            notificationIntent.putExtra("notifyStringDescription", notifyStopString[1]);
+                notifyNow("stop");
+                mLocalBroadcastManager.unregisterReceiver(mLocalBroadcastReceiver);
+                if(notifyStop == true){
+                  Intent notificationIntent = new Intent(reactContext, ShowTimeoutNotification.class);
+                  notificationIntent.putExtra("notifyChannelStringTitle", notifyChannelString[0]);
+                  notificationIntent.putExtra("notifyChannelStringDescription", notifyChannelString[1]);
+                  notificationIntent.putExtra("notifyStringTitle", notifyStopString[0]);
+                  notificationIntent.putExtra("notifyStringDescription", notifyStopString[1]);
 
-            PendingIntent contentIntent = PendingIntent.getService(reactContext, 0, notificationIntent,
-                    PendingIntent.FLAG_CANCEL_CURRENT);
+                  PendingIntent contentIntent = PendingIntent.getService(reactContext, 0, notificationIntent,
+                          PendingIntent.FLAG_CANCEL_CURRENT);
 
-            AlarmManager am = (AlarmManager) reactContext.getSystemService(Context.ALARM_SERVICE);
-            am.cancel(contentIntent);
-          }
+                  AlarmManager am = (AlarmManager) reactContext.getSystemService(Context.ALARM_SERVICE);
+                  am.cancel(contentIntent);
+                }
 
 
-        }
-      })
-      .addOnFailureListener(new OnFailureListener() {
-        @Override
-        public void onFailure(@NonNull Exception e) {
-          Log.e(TAG, "Removing Geofences: " + e.getMessage());
-        }
-      });
+              }
+            })
+            .addOnFailureListener(new OnFailureListener() {
+              @Override
+              public void onFailure(@NonNull Exception e) {
+                Log.e(TAG, "Removing Geofences: " + e.getMessage());
+              }
+            });
   }
 
   public void silentStopMonitoring() {
