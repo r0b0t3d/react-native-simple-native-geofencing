@@ -1,6 +1,7 @@
 
 package com.simplegeofencing.reactnative;
 
+import android.annotation.SuppressLint;
 import android.app.AlarmManager;
 import android.app.NotificationManager;
 import android.app.NotificationChannel;
@@ -199,6 +200,7 @@ public class RNSimpleNativeGeofencingModule extends ReactContextBaseJavaModule {
     Log.i(TAG, "Added geofence: Lat " + geofenceObject.getDouble("latitude") + " Long " + geofenceObject.getDouble("longitude"));
   }
 
+  @SuppressLint("MissingPermission")
   @ReactMethod
   public void startMonitoring(final Callback failCallback) {
     //Context removed by Listeners
@@ -247,6 +249,7 @@ public class RNSimpleNativeGeofencingModule extends ReactContextBaseJavaModule {
     //}
 
   }
+  @SuppressLint("MissingPermission")
   public void silentStartMonitoring() {
     //Context removed by Listeners
     //if (ContextCompat.checkSelfPermission(this.reactContext, Manifest.permission.ACCESS_FINE_LOCATION)
@@ -445,7 +448,7 @@ public class RNSimpleNativeGeofencingModule extends ReactContextBaseJavaModule {
       Long currentTime = System.currentTimeMillis();
       int duration = intent.getIntExtra("duration", 3000);
       Long startTime = intent.getLongExtra("startTime", System.currentTimeMillis());
-      int remainingTime = toIntExact(duration-(currentTime-startTime));
+      int remainingTime = 0;//toIntExact(duration-(currentTime-startTime));
       Log.i(TAG, "Broadcast received");
       Log.i(TAG, "RemainingTimeReceiver: " + remainingTime);
       Intent serviceIntent = new Intent(context, MonitorUpdateService.class);
