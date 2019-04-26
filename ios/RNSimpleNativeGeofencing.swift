@@ -23,9 +23,6 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     let locationManager = CLLocationManager()
     var notificationCenter: UNUserNotificationCenter!
     
-    var currentActiveGeofences : [CLCircularRegion] = []
-    var currentGeofences: [CLCircularRegion] = []
-    
     var didEnterTitle = ""
     var didEnterBody = ""
     var didExitTitle = ""
@@ -40,10 +37,7 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     var notifyStart = false
     var notifyStop = false
     
-    var globalDeletionTimer = 0
-    var globaltimer: Timer?
-    
-    var valueDic: Dictionary<String, String> = [:]
+    var valueDic: Dictionary<String, NSDictionary> = [:]
     var locationAuthorized = true
     var notificationAuthorized = true
     
@@ -82,7 +76,7 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
         
         DispatchQueue.main.async {
             
-            self.allwaysInit()
+            //self.allwaysInit()
             
             self.notifyEnter = settings.value(forKeyPath: "enter.notify") as? Bool ?? true
             self.notifyExit = settings.value(forKeyPath: "exit.notify") as? Bool ?? true
@@ -104,107 +98,78 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     
     @objc(addGeofence:duration:)
     func addGeofence(geofence:NSDictionary, duration:Int) -> Void {
-        
-        DispatchQueue.main.async {
-            
-            
-            guard let lat = geofence.value(forKey: "latitude") as? Double else {
-                return
-            }
-            
-            guard let lon = geofence.value(forKey: "longitude") as? Double else {
-                return
-            }
-            
-            guard let radius = geofence.value(forKey: "radius") as? Double else {
-                return
-            }
-            
-            guard let id = geofence.value(forKey: "key") as? String else {
-                return
-            }
-            
-            let value = geofence.value(forKey: "value") as? String
-            
-            let geofenceRegionCenter = CLLocationCoordinate2D(
-                latitude: lat,
-                longitude: lon
-            )
-            
-            let geofenceRegion = CLCircularRegion(
-                center: geofenceRegionCenter,
-                radius: CLLocationDistance(radius),
-                identifier: id
-            )
-            
-            if value != nil {
-                self.valueDic[id] = value!
-            }
-            
-            geofenceRegion.notifyOnExit = true
-            geofenceRegion.notifyOnEntry = true
-            
-            
-            if !(duration <= 0) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(duration)) {
-                    self.removeGeofence(geofenceKey: id)
-                }
-            }
-            
-            self.currentGeofences.append(geofenceRegion)
-            
-            
+        guard let lat = geofence.value(forKey: "latitude") as? Double else {
+            return
         }
         
+        guard let lon = geofence.value(forKey: "longitude") as? Double else {
+            return
+        }
+        
+        guard let radius = geofence.value(forKey: "radius") as? Double else {
+            return
+        }
+        
+        guard let id = geofence.value(forKey: "key") as? String else {
+            return
+        }
+        
+        let geofenceRegionCenter = CLLocationCoordinate2D(
+            latitude: lat,
+            longitude: lon
+        )
+        
+        let geofenceRegion = CLCircularRegion(
+            center: geofenceRegionCenter,
+            radius: CLLocationDistance(radius),
+            identifier: id
+        )
+        
+        self.valueDic[id] = geofence
+        
+        geofenceRegion.notifyOnExit = true
+        geofenceRegion.notifyOnEntry = true
+        
+        
+        if !(duration <= 0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(duration)) {
+                self.removeGeofence(geofenceKey: id)
+            }
+        }
+        
+        self.startMonitoring(geo: geofenceRegion);
     }
     
     
     @objc(addGeofences:duration:failCallback:)
     func addGeofences(geofencesArray:NSArray, duration:Int, failCallback: @escaping RCTResponseSenderBlock) -> Void {
-        
         DispatchQueue.main.async {
-            
-            
             //add small geofences
             for geofence in geofencesArray {
-                
                 guard let geo = geofence as? NSDictionary else {
                     return
                 }
                 
                 self.addGeofence(geofence: geo, duration: 0)
-                
             }
             
-            self.startMonitoring()
-            
-            self.globalDeletionTimer = duration
-            
-            self.globaltimer = Timer.scheduledTimer(timeInterval: 60.0, target: self, selector: #selector(self.globalCountdown), userInfo: nil, repeats: true)
-            
-            
             self.notificationCenter.getNotificationSettings(completionHandler: { (settings) in
-                
                 if settings.authorizationStatus == .denied {
                     print("Permission not granted")
                     self.notificationAuthorized = false
-                }else{
+                } else {
                     self.notificationAuthorized = true
                 }
                 
                 if !(self.locationAuthorized && self.notificationAuthorized) {
-                    
                     let resultsDict = [
                         "success" : false
                     ];
                     
                     failCallback([NSNull() ,resultsDict])
                 }
-                
             })
-            
         }
-        
     }
     
     
@@ -242,8 +207,6 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
             
             //monitoring boarder (needs specific ID)
             self.addGeofence(geofence: geofence, duration: duration)
-            
-            self.startMonitoring()
         }
         
     }
@@ -253,109 +216,52 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     func removeMonitoringBorder() -> Void {
         
         DispatchQueue.main.async {
-            
-            
-            var count = 0
-            for geo in self.currentActiveGeofences {
-                if geo.identifier == "monitor"{
-                    self.locationManager.stopMonitoring(for: geo)
-                    self.currentActiveGeofences.remove(at: count)
-                }
-                count = count + 1
-            }
-            
-            var count2 = 0
-            for geo in self.currentGeofences {
-                if geo.identifier == "monitor"{
-                    self.currentGeofences.remove(at: count2)
-                }
-                count2 = count2 + 1
+            for geo in self.locationManager.monitoredRegions {
+                self.locationManager.stopMonitoring(for: geo);
             }
         }
-        
     }
     
     
     @objc(removeAllGeofences)
     func removeAllGeofences() -> Void {
-        
         DispatchQueue.main.async {
-            
-            
-            for geo in self.currentActiveGeofences {
-                
+            for geo in self.locationManager.monitoredRegions {
                 self.valueDic[geo.identifier] = nil
-                
                 self.locationManager.stopMonitoring(for: geo)
-                
             }
-            
-            self.currentActiveGeofences = []
-            self.currentGeofences = []
             
             if self.notifyStop {
                 self.notifyStart(started: false)
             }
-            
         }
-        
     }
     
     
     @objc(removeGeofence:)
     func removeGeofence(geofenceKey:String) -> Void {
-        
-        DispatchQueue.main.async {
-            
-            
-            var count = 0
-            for geo in self.currentActiveGeofences {
-                if geo.identifier == geofenceKey{
-                    
-                    self.valueDic[geo.identifier] = nil
-                    
-                    self.locationManager.stopMonitoring(for: geo)
-                    self.currentActiveGeofences.remove(at: count)
-                }
-                count = count + 1;
+        for geo in self.locationManager.monitoredRegions {
+            if geo.identifier == geofenceKey {
+                self.valueDic[geo.identifier] = nil
+                self.locationManager.stopMonitoring(for: geo)
             }
-            
-            var count2 = 0
-            for geo in self.currentGeofences {
-                if geo.identifier == geofenceKey{
-                    
-                    self.valueDic[geo.identifier] = nil
-                    
-                    self.currentGeofences.remove(at: count2)
-                }
-                count2 = count2 + 1;
-            }
-            
-            
         }
-        
     }
     
     
-    @objc(startMonitoring)
-    func startMonitoring() -> Void {
-        
-        DispatchQueue.main.async {
-            
-            
-            for geo in self.currentGeofences {
-                
+    @objc(startMonitoring:)
+    func startMonitoring(geo: CLCircularRegion) -> Void {
+        // Make sure the app is authorized.
+        let status = CLLocationManager.authorizationStatus();
+        if status == .authorizedAlways || status == .authorizedWhenInUse {
+            // Make sure region monitoring is supported.
+            if CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) {
                 self.locationManager.startMonitoring(for: geo)
-                self.currentActiveGeofences.append(geo)
                 
+                if self.notifyStart {
+                    self.notifyStart(started: true)
+                }
             }
-            
-            self.currentGeofences = []
-            
-            if self.notifyStart {
-                self.notifyStart(started: true)
-            }
-            
         }
     }
     
@@ -364,21 +270,22 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     func stopMonitoring() -> Void {
         
         DispatchQueue.main.async {
-            
-            
-            for geo in self.currentActiveGeofences {
-                
+            for geo in self.locationManager.monitoredRegions {
                 self.locationManager.stopMonitoring(for: geo)
-                
             }
             
-            self.currentActiveGeofences = []
             if self.notifyStop {
                 self.notifyStart(started: false)
             }
-            
         }
-        
+    }
+    
+    func stopMonitoring(id: String) {
+        for region in locationManager.monitoredRegions {
+            guard let circularRegion = region as? CLCircularRegion,
+                circularRegion.identifier == id else { continue }
+            locationManager.stopMonitoring(for: circularRegion)
+        }
     }
     
     
@@ -387,77 +294,50 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     //MARK: - helpe
     
     func startSilenceMonitoring() -> Void {
-        
         DispatchQueue.main.async {
-            
-            
-            for geo in self.currentGeofences {
-                
+            for geo in self.locationManager.monitoredRegions {
                 self.locationManager.startMonitoring(for: geo)
-                self.currentActiveGeofences.append(geo)
-                
             }
-            
-            self.currentGeofences = []
         }
     }
-    
-    @objc func globalCountdown(){
-        
-        globalDeletionTimer = globalDeletionTimer - 60000
-        
-        if globalDeletionTimer <= 0 {
-            self.removeAllGeofences()
-            self.globaltimer?.invalidate()
-        }
-        
-    }
-    
-    
-    
-    
-    
     
     //MARK: - Setup Notifications
     
     private func handleEvent(region: CLRegion!, didEnter: Bool) {
         
-        if region.identifier == "monitor" {
-            
+//        if region.identifier == "monitor" {
+        
             if didEnter {
-                
-                let body : [String:AnyObject] = [
-                    "durationLeft": self.globalDeletionTimer as AnyObject,
-                    "leftMonitoring": "false" as AnyObject
+                let body : [String: Any] = [
+                    "id": region!.identifier as String,
+                    "event": "didEnter"
                 ]
                 
                 self.sendEvent(withName: "leftMonitoringBorderWithDuration", body: body )
-                
-            }else{
-                
-                let body : [String:AnyObject] = [
-                    "durationLeft": self.globalDeletionTimer as AnyObject,
-                    "leftMonitoring": "true" as AnyObject
+            } else {
+                let body : [String: Any] = [
+                    "id": region.identifier as String,
+                    "event": "didExit"
                 ]
-                
                 self.sendEvent(withName: "leftMonitoringBorderWithDuration", body: body )
-                
             }
             
-        }else{
-            
+//        }else{
+        
             let content = UNMutableNotificationContent()
             content.sound = UNNotificationSound.default
             
             
             if self.didEnterBody.contains("[value]") {
-                if let value = self.valueDic[region.identifier] {
+                if let geofence = self.valueDic[region.identifier] {
+                    let value = geofence["value"] as? String ?? "SoThuTu";
                     self.didEnterBody = self.didEnterBody.replacingOccurrences(of: "[value]", with: value, options: NSString.CompareOptions.literal, range:nil)
                 }
             }
             
             if self.didExitBody.contains("[value]") {
-                if let value = self.valueDic[region.identifier] {
+                if let geofence = self.valueDic[region.identifier] {
+                    let value = geofence["value"] as? String ?? "SoThuTu";
                     self.didExitBody = self.didExitBody.replacingOccurrences(of: "[value]", with: value, options: NSString.CompareOptions.literal, range:nil)
                 }
             }
@@ -503,7 +383,7 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
                 }
             }
             
-        }
+//        }
         
         
     }
@@ -553,18 +433,13 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     
     func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         if region is CLCircularRegion {
-            
             self.handleEvent(region:region, didEnter: true)
-            
-            
         }
     }
     
     func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         if region is CLCircularRegion {
-            
             self.handleEvent(region:region, didEnter: false)
-            
         }
     }
     

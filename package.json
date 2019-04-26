@@ -1,17 +1,12 @@
 {
-  "name": "react-native-simple-native-geofencing",
+  "name": "smartq-geofencing",
   "version": "0.8.4",
-  "description": "**Attention: This repo is not yet fully tested !**",
+  "description": "",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [
-    "react-native",
-    "geofence",
-    "geofencing",
-    "native"
-  ],
+  "keywords": [],
   "author": "Michael Raring",
   "contributors": [
     "Fabian Puch"
