@@ -58,8 +58,8 @@ export type InitNotificationsSettings = {
 
 export function initNotification(settings: InitNotificationsSettings): any;
 export function addGeofence(geofence: Geofence, duration: number): any;
-export function addGeofences(geofences: Geofence[], duration: number, failCallback: Function): any;
-export function removeAllGeofences(): any;
+export function addGeofences(geofences: Geofence[], duration: number): Promise<any>;
+export function removeAllGeofences(): Promise<any>;
 export function updateGeofences(geofences: Geofence[], duration: number): any;
 export function removeGeofence(key: string): any;
 export function startMonitoring(failCallback: Function): any;

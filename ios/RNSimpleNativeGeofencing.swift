@@ -76,7 +76,7 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
         
         DispatchQueue.main.async {
             
-            //self.allwaysInit()
+            self.allwaysInit()
             
             self.notifyEnter = settings.value(forKeyPath: "enter.notify") as? Bool ?? true
             self.notifyExit = settings.value(forKeyPath: "exit.notify") as? Bool ?? true
@@ -141,8 +141,11 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     }
     
     
-    @objc(addGeofences:duration:failCallback:)
-    func addGeofences(geofencesArray:NSArray, duration:Int, failCallback: @escaping RCTResponseSenderBlock) -> Void {
+    @objc(addGeofences:duration:resolver:rejecter:)
+    func addGeofences(geofencesArray:NSArray,
+                      duration:Int,
+                      resolver resolve: @escaping RCTPromiseResolveBlock,
+                      rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
         DispatchQueue.main.async {
             //add small geofences
             for geofence in geofencesArray {
@@ -162,24 +165,25 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
                 }
                 
                 if !(self.locationAuthorized && self.notificationAuthorized) {
-                    let resultsDict = [
-                        "success" : false
-                    ];
-                    
-                    failCallback([NSNull() ,resultsDict])
+                    reject("PERMISSION_DENIED", "Do not have permissions", nil)
+                } else {
+                    resolve(true);
                 }
             })
         }
     }
     
     
-    @objc(updateGeofences:duration:)
-    func updateGeofences(geofencesArray:NSArray, duration:Int) -> Void {
+    @objc
+    func updateGeofences(geofencesArray: NSArray,
+                         duration:Int,
+                         resolver resolve: @escaping RCTPromiseResolveBlock,
+                         rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
         
         DispatchQueue.main.async {
             
             
-            self.removeAllGeofences()
+            self.removeAllGeofences(resolver: resolve, rejecter: reject)
             
             //add small geofences
             for geofence in geofencesArray {
@@ -223,18 +227,18 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     }
     
     
-    @objc(removeAllGeofences)
-    func removeAllGeofences() -> Void {
-        DispatchQueue.main.async {
-            for geo in self.locationManager.monitoredRegions {
-                self.valueDic[geo.identifier] = nil
-                self.locationManager.stopMonitoring(for: geo)
-            }
-            
-            if self.notifyStop {
-                self.notifyStart(started: false)
-            }
+    @objc(removeAllGeofences:rejecter:)
+    func removeAllGeofences(resolver resolve: @escaping RCTPromiseResolveBlock,
+                            rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
+        for geo in self.locationManager.monitoredRegions {
+            self.valueDic[geo.identifier] = nil
+            self.locationManager.stopMonitoring(for: geo)
         }
+        
+        if self.notifyStop {
+            self.notifyStart(started: false)
+        }
+        resolve(true)
     }
     
     

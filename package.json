@@ -15,9 +15,6 @@
   "peerDependencies": {
     "react-native": "^0.41.2"
   },
-  "devDependencies": {
-    "react-native": "^0.59.6"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/michaelmika/react-native-simple-native-geofencing.git"

@@ -286,7 +286,7 @@ import {... , NativeEventEmitter} from 'react-native';
 componentWillMount(){ 
     const myModuleEvt = new NativeEventEmitter(RNSimpleNativeGeofencing);
         let subscription = myModuleEvt.addListener(
-        'leftMonitoringBorderWithDuration',
+        'monitorGeofence',
         (result) => {
         
             //result is a Object with the remaining 
@@ -304,7 +304,7 @@ componentWillMount(){
 In Android this implementation uses Headless JS, which allows you to run javascript code in 
 the background (see [Headless JS Docs](https://facebook.github.io/react-native/docs/headless-js-android)).
 
-Therefore, you have to define a task as an asynchronous function with the name `leftMonitoringBorderWithDuration`
+Therefore, you have to define a task as an asynchronous function with the name `monitorGeofence`
 ```javascript
 import React from 'react';
 import RNSimpleNativeGeofencing from "react-native-simple-native-geofencing";
@@ -329,7 +329,7 @@ import {name as appName} from './app.json';
 // Your App
 AppRegistry.registerComponent(appName, () => App);
 // Your defined task (see above)
-AppRegistry.registerHeadlessTask('leftMonitoringBorderWithDuration', () => require('./leftMonitoringBorderWithDuration'));
+AppRegistry.registerHeadlessTask('monitorGeofence', () => require('./monitorGeofence'));
 ```
 
 # License
