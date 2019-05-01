@@ -12,17 +12,16 @@ import com.facebook.react.jstasks.HeadlessJsTaskConfig
 
 class MonitorUpdateService : HeadlessJsTaskService() {
     override fun getTaskConfig(intent: Intent?): HeadlessJsTaskConfig? {
-        var extras = intent!!.extras
-        if (extras == null) {
-            extras = Bundle()
+        val extras = intent!!.extras
+        if (extras != null) {
+            Log.i("MonitorUpdate: extras", "remainingTime: " + extras.getInt("remainingTime"))
+            return HeadlessJsTaskConfig(
+                    "monitorGeofence",
+                    Arguments.fromBundle(extras),
+                    extras.getInt("duration", 50000000).toLong(), // timeout for the task
+                    true // optional: defines whether or not  the task is allowed in foreground. Default is false
+            )
         }
-        Log.i("MonitorUpdate: extras", "remainingTime: " + extras.getInt("remainingTime"))
-        return HeadlessJsTaskConfig(
-                "monitorGeofence",
-                Arguments.fromBundle(extras),
-                extras.getInt("duration", 50000000).toLong(), // timeout for the task
-                true // optional: defines whether or not  the task is allowed in foreground. Default is false
-        )
-
+        return null
     }
 }

@@ -50,54 +50,25 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
     private val mLocalBroadcastManager: LocalBroadcastManager
     private val geofenceValues: ArrayList<String>
     private val geofenceKeys: ArrayList<String>
+    private val geofenceStorage = GeofenceStorage(reactContext)
 
     /*
     Helpfunctions
    */
 
-    private val geofencingRequest: GeofencingRequest
-        get() {
-            val builder = GeofencingRequest.Builder()
-            builder.setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
-            builder.addGeofences(mGeofenceList)
-            return builder.build()
-        }
+    private fun getGeofencingRequest(): GeofencingRequest {
+        return GeofencingRequest.Builder().apply {
+            setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
+            addGeofences(mGeofenceList)
+        }.build()
+    }
 
-    private// Reuse the PendingIntent if we already have it.
-    // Add notification data
-    // We use FLAG_UPDATE_CURRENT so that we get the same pending intent back when
-    // calling addGeofences() and removeGeofences().
-    val geofencePendingIntent: PendingIntent?
-        get() {
-            if (mGeofencePendingIntent != null) {
-                return mGeofencePendingIntent
-            }
-            val intent = Intent(this.currentActivity, GeofenceTransitionsIntentService::class.java)
-            intent.putExtra("notifyEnter", notifyEnter)
-            if (notifyEnter == true) {
-                intent.putExtra("notifyEnterStringTitle", notifyEnterString[0])
-                intent.putExtra("notifyEnterStringDescription", notifyEnterString[1])
-            } else {
-                intent.putExtra("notifyEnterStringTitle", "")
-                intent.putExtra("notifyEnterStringDescription", "")
-            }
-            intent.putExtra("notifyExit", notifyExit)
-            if (notifyExit == true) {
-                intent.putExtra("notifyExitStringTitle", notifyExitString[0])
-                intent.putExtra("notifyExitStringDescription", notifyExitString[1])
-            } else {
-                intent.putExtra("notifyExitStringTitle", "")
-                intent.putExtra("notifyExitStringDescription", "")
-            }
-            intent.putExtra("notifyChannelStringTitle", notifyChannelString[0])
-            intent.putExtra("notifyChannelStringDescription", notifyChannelString[1])
-            intent.putExtra("startTime", System.currentTimeMillis())
-            intent.putExtra("duration", mDuration)
-            intent.putStringArrayListExtra("geofenceKeys", geofenceKeys)
-            intent.putStringArrayListExtra("geofenceValues", geofenceValues)
-            mGeofencePendingIntent = PendingIntent.getService(reactContext, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT)
-            return mGeofencePendingIntent
-        }
+    private val geofencePendingIntent: PendingIntent by lazy {
+        val intent = Intent(reactContext, GeofenceTransitionsIntentService::class.java)
+        // We use FLAG_UPDATE_CURRENT so that we get the same pending intent back when calling
+        // addGeofences() and removeGeofences().
+        PendingIntent.getService(reactContext, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+    }
 
 
     init {
@@ -152,24 +123,29 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
     @ReactMethod
     fun removeAllGeofences(promise: Promise) {
         mGeofenceList.clear()
-        stopMonitoring(promise)
+        val requestIds = geofenceStorage.getAllIds().toMutableList()
+        stopMonitoring(requestIds, promise)
     }
 
     @ReactMethod
     fun removeGeofence(key: String) {
         var index = -1
         for (i in mGeofenceList.indices) {
-            if (mGeofenceList[i].requestId === key) {
+            if (mGeofenceList[i].requestId == key) {
                 index = i
             }
         }
         if (index != -1) {
             mGeofenceList.removeAt(index)
-            //Remove from Client as well
-            val item = ArrayList<String>()
-            item.add(key)
-            mGeofencingClient.removeGeofences(item)
         }
+
+        //Remove from Client as well
+        val item = ArrayList<String>()
+        item.add(key)
+        mGeofencingClient.removeGeofences(item)
+                .addOnSuccessListener {
+                    geofenceStorage.removeGeofence(key)
+                }
     }
 
 
@@ -180,30 +156,15 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
             promise: Promise) {
         //Add geohashes
         for (i in 0 until geofenceArray.size()) {
-            val geofence = geofenceArray.getMap(i)
-            buildGeofence(geofence, duration)
+            val geofenceMap = geofenceArray.getMap(i)
+            buildGeofence(geofenceMap, duration)
+            //Start Monitoring
         }
-        //Start Monitoring
         startMonitoring(promise)
     }
 
-    @ReactMethod
-    fun updateGeofences(
-            geofenceArray: ReadableArray,
-            duration: Int
-    ) {
-        mGeofenceList.clear()
-        silentStopMonitoring()
-        //Add geohashes
-        for (i in 0 until geofenceArray.size()) {
-            val geofence = geofenceArray.getMap(i)
-            buildGeofence(geofence, duration)
-        }
-        silentStartMonitoring()
-    }
-
-    fun buildGeofence(geofenceObject: ReadableMap?, duration: Int) {
-        mGeofenceList.add(Geofence.Builder()
+    private fun buildGeofence(geofenceObject: ReadableMap?, duration: Int): Geofence {
+        val geofence = Geofence.Builder()
                 .setRequestId(geofenceObject!!.getString("key"))
                 .setCircularRegion(
                         geofenceObject.getDouble("latitude"),
@@ -213,13 +174,16 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
                 .setExpirationDuration(duration.toLong())
                 .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT)
                 .setNotificationResponsiveness(5 * 60 * 1000)
-                .build())
+                .build()
+        geofenceStorage.addGeofence(geofence.requestId)
+        mGeofenceList.add(geofence)
 
         if (geofenceObject.hasKey("value")) {
             geofenceKeys.add(geofenceObject.getString("key") ?: "")
             geofenceValues.add(geofenceObject.getString("value") ?: "")
         }
         mDuration = duration
+        return geofence
     }
 
     @ReactMethod
@@ -232,10 +196,8 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
     @SuppressLint("MissingPermission")
     @ReactMethod
     fun startMonitoring(promise: Promise) {
-        //Context removed by Listeners
-        //if (ContextCompat.checkSelfPermission(this.reactContext, Manifest.permission.ACCESS_FINE_LOCATION)
-        //        != PackageManager.PERMISSION_GRANTED){
-        mGeofencingClient.addGeofences(geofencingRequest, geofencePendingIntent)
+        mLocalBroadcastManager.unregisterReceiver(mLocalBroadcastReceiver)
+        mGeofencingClient.addGeofences(getGeofencingRequest(), geofencePendingIntent)
                 .addOnSuccessListener {
                     Log.i(TAG, "Added Geofences")
                     notifyNow("start")
@@ -273,28 +235,27 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
 
     }
 
-    @SuppressLint("MissingPermission")
-    fun silentStartMonitoring() {
-        //Context removed by Listeners
-        //if (ContextCompat.checkSelfPermission(this.reactContext, Manifest.permission.ACCESS_FINE_LOCATION)
-        //        != PackageManager.PERMISSION_GRANTED){
-        mGeofencingClient.addGeofences(geofencingRequest, geofencePendingIntent)
-                .addOnSuccessListener { Log.i(TAG, "Updated Geofences") }
-                .addOnFailureListener { e ->
-                    Log.e(TAG, "Updating Geofences: " + e.message)
-                    e.printStackTrace()
-                }
-        //}
+//    @SuppressLint("MissingPermission")
+//    fun silentStartMonitoring() {
+//        //Context removed by Listeners
+//        //if (ContextCompat.checkSelfPermission(this.reactContext, Manifest.permission.ACCESS_FINE_LOCATION)
+//        //        != PackageManager.PERMISSION_GRANTED){
+//        mGeofencingClient.addGeofences(geofencingRequest, geofencePendingIntent)
+//                .addOnSuccessListener { Log.i(TAG, "Updated Geofences") }
+//                .addOnFailureListener { e ->
+//                    Log.e(TAG, "Updating Geofences: " + e.message)
+//                    e.printStackTrace()
+//                }
+//        //}
+//
+//    }
 
-    }
-
-    @ReactMethod
-    fun stopMonitoring(promise: Promise) {
+    private fun stopMonitoring(requestIds: List<String>, promise: Promise) {
         //Context removed by Listeners
-        mGeofencingClient.removeGeofences(geofencePendingIntent)
+        mGeofencingClient.removeGeofences(requestIds)
                 .addOnSuccessListener {
                     Log.i(TAG, "Removed Geofences")
-
+                    geofenceStorage.removeAll()
                     notifyNow("stop")
                     mLocalBroadcastManager.unregisterReceiver(mLocalBroadcastReceiver)
                     if (notifyStop == true) {
@@ -316,13 +277,6 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
                     Log.e(TAG, "Removing Geofences: " + e.message)
                     promise.reject(e);
                 }
-    }
-
-    fun silentStopMonitoring() {
-        //Context removed by Listeners
-        mGeofencingClient.removeGeofences(geofencePendingIntent)
-                .addOnSuccessListener { Log.i(TAG, "Removed Geofences") }
-                .addOnFailureListener { e -> Log.e(TAG, "Removing Geofences: " + e.message) }
     }
 
     @ReactMethod
@@ -401,7 +355,6 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
     //BroadcastReceiver
     inner class LocalBroadcastReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val currentTime = System.currentTimeMillis()
             val duration = intent.getIntExtra("duration", 3000)
             val startTime = intent.getLongExtra("startTime", System.currentTimeMillis())
             val remainingTime = 0//toIntExact(duration-(currentTime-startTime));
@@ -417,10 +370,6 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
             serviceIntent.putExtra("event", event)
             context.startService(serviceIntent)
             HeadlessJsTaskService.acquireWakeLockNow(context)
-
-            //reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-            //        .emit("monitorGeofence", remainingTime);
-
         }
     }
 

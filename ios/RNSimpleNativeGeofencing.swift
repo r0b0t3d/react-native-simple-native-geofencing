@@ -14,14 +14,12 @@ import UserNotifications
 @available(iOS 10.0, *)
 @objc(RNSimpleNativeGeofencing)
 class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificationCenterDelegate {
-    
-    
     //MARK: - Init / Setup / Vars
     
     static let sharedInstance = RNSimpleNativeGeofencing()
     
     let locationManager = CLLocationManager()
-    var notificationCenter: UNUserNotificationCenter!
+    var notificationCenter: UNUserNotificationCenter?
     
     var didEnterTitle = ""
     var didEnterBody = ""
@@ -41,26 +39,27 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     var locationAuthorized = true
     var notificationAuthorized = true
     
-    
-    
     override func supportedEvents() -> [String]! {
-        return ["leftMonitoringBorderWithDuration"]
+        return ["monitorGeofence"]
+    }
+    
+    override init() {
+        
     }
     
     fileprivate func allwaysInit() {
-        
         self.locationManager.delegate = self
-        self.locationManager.requestAlwaysAuthorization()
+//        self.locationManager.requestAlwaysAuthorization()
         
         self.notificationCenter = UNUserNotificationCenter.current()
-        notificationCenter.delegate = self
+        notificationCenter?.delegate = self
         
-        let options: UNAuthorizationOptions = [.alert, .sound]
-        notificationCenter.requestAuthorization(options: options) { (granted, error) in
-            if granted {
-                self.notificationAuthorized = true
-            }
-        }
+//        let options: UNAuthorizationOptions = [.alert, .sound]
+//        notificationCenter?.requestAuthorization(options: options) { (granted, error) in
+//            if granted {
+//                self.notificationAuthorized = true
+//            }
+//        }
         
     }
     
@@ -146,31 +145,29 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
                       duration:Int,
                       resolver resolve: @escaping RCTPromiseResolveBlock,
                       rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
-        DispatchQueue.main.async {
-            //add small geofences
-            for geofence in geofencesArray {
-                guard let geo = geofence as? NSDictionary else {
-                    return
-                }
-                
-                self.addGeofence(geofence: geo, duration: 0)
+        //add small geofences
+        for geofence in geofencesArray {
+            guard let geo = geofence as? NSDictionary else {
+                return
             }
             
-            self.notificationCenter.getNotificationSettings(completionHandler: { (settings) in
-                if settings.authorizationStatus == .denied {
-                    print("Permission not granted")
-                    self.notificationAuthorized = false
-                } else {
-                    self.notificationAuthorized = true
-                }
-                
-                if !(self.locationAuthorized && self.notificationAuthorized) {
-                    reject("PERMISSION_DENIED", "Do not have permissions", nil)
-                } else {
-                    resolve(true);
-                }
-            })
+            self.addGeofence(geofence: geo, duration: 0)
         }
+        resolve(true);
+        self.notificationCenter?.getNotificationSettings(completionHandler: { (settings) in
+            if settings.authorizationStatus == .denied {
+                print("Permission not granted")
+                self.notificationAuthorized = false
+            } else {
+                self.notificationAuthorized = true
+            }
+            
+            if !(self.locationAuthorized && self.notificationAuthorized) {
+                //                    reject("PERMISSION_DENIED", "Do not have permissions", nil)
+            } else {
+                
+            }
+        })
     }
     
     
@@ -317,13 +314,13 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
                     "event": "didEnter"
                 ]
                 
-                self.sendEvent(withName: "leftMonitoringBorderWithDuration", body: body )
+                self.sendEvent(withName: "monitorGeofence", body: body )
             } else {
                 let body : [String: Any] = [
                     "id": region.identifier as String,
                     "event": "didExit"
                 ]
-                self.sendEvent(withName: "leftMonitoringBorderWithDuration", body: body )
+                self.sendEvent(withName: "monitorGeofence", body: body )
             }
             
 //        }else{
@@ -373,7 +370,7 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
                 trigger: trigger
             )
             
-            notificationCenter.add(request, withCompletionHandler: { (error) in
+            notificationCenter?.add(request, withCompletionHandler: { (error) in
                 if error != nil {
                     print("Error adding notification with identifier: \(identifier)")
                 }
@@ -382,7 +379,7 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
             
             if !didEnter {
                 DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(10)) {
-                    self.notificationCenter.removeDeliveredNotifications(withIdentifiers: ["enter: \(region.identifier)","exit: \(region.identifier)"])
+                    self.notificationCenter?.removeDeliveredNotifications(withIdentifiers: ["enter: \(region.identifier)","exit: \(region.identifier)"])
                     
                 }
             }
@@ -423,7 +420,7 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
             trigger: trigger
         )
         
-        notificationCenter.add(request, withCompletionHandler: { (error) in
+        notificationCenter?.add(request, withCompletionHandler: { (error) in
             if error != nil {
                 print("Error adding notification with identifier: \(identifier)")
             }
