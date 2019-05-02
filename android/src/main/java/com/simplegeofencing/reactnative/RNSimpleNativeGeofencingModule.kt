@@ -160,6 +160,10 @@ class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationC
             buildGeofence(geofenceMap, duration)
             //Start Monitoring
         }
+        if (mGeofenceList.size == 0) {
+            promise.reject("NO_GEOFENCE", "No geofence")
+            return
+        }
         startMonitoring(promise)
     }
 
