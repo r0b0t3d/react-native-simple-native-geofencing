@@ -77,10 +77,10 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
             
             self.allwaysInit()
             
-            self.notifyEnter = settings.value(forKeyPath: "enter.notify") as? Bool ?? true
-            self.notifyExit = settings.value(forKeyPath: "exit.notify") as? Bool ?? true
-            self.notifyStart = settings.value(forKeyPath: "start.notify") as? Bool ?? true
-            self.notifyStop = settings.value(forKeyPath: "stop.notify") as? Bool ?? true
+            self.notifyEnter = settings.value(forKeyPath: "enter.notify") as? Bool ?? false
+            self.notifyExit = settings.value(forKeyPath: "exit.notify") as? Bool ?? false
+            self.notifyStart = settings.value(forKeyPath: "start.notify") as? Bool ?? false
+            self.notifyStop = settings.value(forKeyPath: "stop.notify") as? Bool ?? false
             
             self.didEnterTitle = settings.value(forKeyPath: "enter.title") as? String ?? "Be careful!"
             self.didEnterBody = settings.value(forKeyPath: "enter.description") as? String ?? "It may be dangerous in the area where you are currently staying."
@@ -169,7 +169,6 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
             }
         })
     }
-    
     
     @objc
     func updateGeofences(geofencesArray: NSArray,
@@ -305,88 +304,82 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     //MARK: - Setup Notifications
     
     private func handleEvent(region: CLRegion!, didEnter: Bool) {
+        if didEnter {
+            let body : [String: Any] = [
+                "id": region!.identifier as String,
+                "event": "didEnter"
+            ]
+            
+            self.sendEvent(withName: "monitorGeofence", body: body )
+        } else {
+            let body : [String: Any] = [
+                "id": region.identifier as String,
+                "event": "didExit"
+            ]
+            self.sendEvent(withName: "monitorGeofence", body: body )
+        }
+    
+        if (didEnter && !self.notifyEnter) || (!didEnter && !self.notifyExit) {
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.sound = UNNotificationSound.default
         
-//        if region.identifier == "monitor" {
         
-            if didEnter {
-                let body : [String: Any] = [
-                    "id": region!.identifier as String,
-                    "event": "didEnter"
-                ]
+        if self.didEnterBody.contains("[value]") {
+            if let geofence = self.valueDic[region.identifier] {
+                let value = geofence["value"] as? String ?? "SoThuTu";
+                self.didEnterBody = self.didEnterBody.replacingOccurrences(of: "[value]", with: value, options: NSString.CompareOptions.literal, range:nil)
+            }
+        }
+        
+        if self.didExitBody.contains("[value]") {
+            if let geofence = self.valueDic[region.identifier] {
+                let value = geofence["value"] as? String ?? "SoThuTu";
+                self.didExitBody = self.didExitBody.replacingOccurrences(of: "[value]", with: value, options: NSString.CompareOptions.literal, range:nil)
+            }
+        }
+        
+        var identifier = ""
+        
+        if didEnter {
+            content.title = self.didEnterTitle
+            content.body = self.didEnterBody
+            identifier = "enter: \(region.identifier)"
+        }else{
+            content.title = self.didExitTitle
+            content.body = self.didExitBody
+            identifier = "exit: \(region.identifier)"
+        }
+        
+        
+        let timeInSeconds: TimeInterval = 0.1
+        
+        let trigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: timeInSeconds,
+            repeats: false
+        )
+        
+        
+        let request = UNNotificationRequest(
+            identifier: identifier,
+            content: content,
+            trigger: trigger
+        )
+        
+        notificationCenter?.add(request, withCompletionHandler: { (error) in
+            if error != nil {
+                print("Error adding notification with identifier: \(identifier)")
+            }
+        })
+        
+        
+        if !didEnter {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(10)) {
+                self.notificationCenter?.removeDeliveredNotifications(withIdentifiers: ["enter: \(region.identifier)","exit: \(region.identifier)"])
                 
-                self.sendEvent(withName: "monitorGeofence", body: body )
-            } else {
-                let body : [String: Any] = [
-                    "id": region.identifier as String,
-                    "event": "didExit"
-                ]
-                self.sendEvent(withName: "monitorGeofence", body: body )
             }
-            
-//        }else{
-        
-            let content = UNMutableNotificationContent()
-            content.sound = UNNotificationSound.default
-            
-            
-            if self.didEnterBody.contains("[value]") {
-                if let geofence = self.valueDic[region.identifier] {
-                    let value = geofence["value"] as? String ?? "SoThuTu";
-                    self.didEnterBody = self.didEnterBody.replacingOccurrences(of: "[value]", with: value, options: NSString.CompareOptions.literal, range:nil)
-                }
-            }
-            
-            if self.didExitBody.contains("[value]") {
-                if let geofence = self.valueDic[region.identifier] {
-                    let value = geofence["value"] as? String ?? "SoThuTu";
-                    self.didExitBody = self.didExitBody.replacingOccurrences(of: "[value]", with: value, options: NSString.CompareOptions.literal, range:nil)
-                }
-            }
-            
-            var identifier = ""
-            
-            if didEnter {
-                content.title = self.didEnterTitle
-                content.body = self.didEnterBody
-                identifier = "enter: \(region.identifier)"
-            }else{
-                content.title = self.didExitTitle
-                content.body = self.didExitBody
-                identifier = "exit: \(region.identifier)"
-            }
-            
-            
-            let timeInSeconds: TimeInterval = 0.1
-            
-            let trigger = UNTimeIntervalNotificationTrigger(
-                timeInterval: timeInSeconds,
-                repeats: false
-            )
-            
-            
-            let request = UNNotificationRequest(
-                identifier: identifier,
-                content: content,
-                trigger: trigger
-            )
-            
-            notificationCenter?.add(request, withCompletionHandler: { (error) in
-                if error != nil {
-                    print("Error adding notification with identifier: \(identifier)")
-                }
-            })
-            
-            
-            if !didEnter {
-                DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(10)) {
-                    self.notificationCenter?.removeDeliveredNotifications(withIdentifiers: ["enter: \(region.identifier)","exit: \(region.identifier)"])
-                    
-                }
-            }
-            
-//        }
-        
-        
+        }
     }
     
     
@@ -432,6 +425,11 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
     
     //MARK: - Location Delegate Methodes
     
+    func locationManager(_ manager: CLLocationManager, didStartMonitoringFor region: CLRegion) {
+        print("BM didStartMonitoringForRegion")
+        locationManager.requestState(for: region) // should locationManager be manager?
+    }
+    
     func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         if region is CLCircularRegion {
             self.handleEvent(region:region, didEnter: true)
@@ -453,7 +451,20 @@ class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUs
         }
     }
     
-    
+    func locationManager(_ manager: CLLocationManager, didDetermineState state: CLRegionState, for region: CLRegion) {
+        print("BM didDetermineState \(state)");
+        switch state {
+        case .inside:
+            print("BeaconManager:didDetermineState CLRegionState.Inside \(region.identifier)");
+            self.handleEvent(region: region, didEnter: true)
+        case .outside:
+            print("BeaconManager:didDetermineState CLRegionState.Outside");
+        case .unknown:
+            print("BeaconManager:didDetermineState CLRegionState.Unknown");
+        default:
+            print("BeaconManager:didDetermineState default");
+        }
+    }
     
     
     
