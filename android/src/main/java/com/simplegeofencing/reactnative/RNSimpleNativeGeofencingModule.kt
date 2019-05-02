@@ -1,500 +1,383 @@
-//
-//  IOSGeofenceManager.swift
-//  RNSimpleNativeGeofencing
-//
-//  Created by Fabian Puch on 13.01.19.
-//  Copyright © 2019 Facebook. All rights reserved.
-//
+package com.simplegeofencing.reactnative
 
-import Foundation
-import CoreLocation
-import UserNotifications
+import android.annotation.SuppressLint
+import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.support.v4.app.NotificationCompat
+import android.support.v4.app.NotificationManagerCompat
+import android.support.v4.content.LocalBroadcastManager
+import android.util.Log
+
+import com.facebook.react.HeadlessJsTaskService
+import com.facebook.react.bridge.*
+import com.google.android.gms.location.Geofence
+import com.google.android.gms.location.GeofencingClient
+import com.google.android.gms.location.GeofencingRequest
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.tasks.OnFailureListener
+import com.google.android.gms.tasks.OnSuccessListener
+
+import java.util.ArrayList
+
+//import android.support.v4.app.NotificationCompat;
+
+class RNSimpleNativeGeofencingModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+    private val mGeofencingClient: GeofencingClient = LocationServices.getGeofencingClient(reactContext)
+    private val mGeofenceList: MutableList<Geofence>
+    private var mGeofencePendingIntent: PendingIntent? = null
+    private val TAG = "SNGeofencing"
+    private val CHANNEL_ID = "channel_01"
+    private val channel: NotificationChannel? = null
+    private val notifyChannelString = arrayOfNulls<String>(2)
+    private var notifyStart = false
+    private var notifyStop = false
+    private var notifyEnter = false
+    private var notifyExit = false
+    private val notifyStartString = arrayOfNulls<String>(2)
+    private val notifyStopString = arrayOfNulls<String>(2)
+    private val notifyEnterString = arrayOfNulls<String>(2)
+    private val notifyExitString = arrayOfNulls<String>(2)
+    private var mStartTime: Long? = null
+    private var mDuration: Int = 0
+    private val mLocalBroadcastReceiver: LocalBroadcastReceiver
+    private val mLocalBroadcastManager: LocalBroadcastManager
+    private val geofenceValues: ArrayList<String>
+    private val geofenceKeys: ArrayList<String>
+    private val geofenceStorage = GeofenceStorage(reactContext)
+
+    /*
+    Helpfunctions
+   */
+
+    private fun getGeofencingRequest(): GeofencingRequest {
+        return GeofencingRequest.Builder().apply {
+            setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
+            addGeofences(mGeofenceList)
+        }.build()
+    }
+
+    private val geofencePendingIntent: PendingIntent by lazy {
+        val intent = Intent(reactContext, GeofenceTransitionsIntentService::class.java)
+        // We use FLAG_UPDATE_CURRENT so that we get the same pending intent back when calling
+        // addGeofences() and removeGeofences().
+        PendingIntent.getService(reactContext, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+    }
 
 
-@available(iOS 10.0, *)
-@objc(RNSimpleNativeGeofencing)
-class RNSimpleNativeGeofencing: RCTEventEmitter, CLLocationManagerDelegate, UNUserNotificationCenterDelegate {
-    //MARK: - Init / Setup / Vars
-    
-    static let sharedInstance = RNSimpleNativeGeofencing()
-    
-    let locationManager = CLLocationManager()
-    var notificationCenter: UNUserNotificationCenter?
-    
-    var didEnterTitle = ""
-    var didEnterBody = ""
-    var didExitTitle = ""
-    var didExitBody = ""
-    var startTrackingTitle = ""
-    var startTrackingBody = ""
-    var stopTrackingTitle = ""
-    var stopTrackingBody = ""
-    
-    var notifyEnter = true
-    var notifyExit = false
-    var notifyStart = false
-    var notifyStop = false
-    
-    var valueDic: Dictionary<String, NSDictionary> = [:]
-    var locationAuthorized = true
-    var notificationAuthorized = true
-    
-    override func supportedEvents() -> [String]! {
-        return ["monitorGeofence"]
+    init {
+        this.mGeofenceList = ArrayList()
+        this.mLocalBroadcastReceiver = LocalBroadcastReceiver()
+        this.mLocalBroadcastManager = LocalBroadcastManager.getInstance(reactContext)
+        this.notifyChannelString[0] = "Title"
+        this.notifyChannelString[1] = "Description"
+        this.geofenceKeys = ArrayList()
+        this.geofenceValues = ArrayList()
     }
-    
-    override init() {
-        
+
+    override fun getName(): String {
+        return "RNSimpleNativeGeofencing"
     }
-    
-    fileprivate func allwaysInit() {
-        self.locationManager.delegate = self
-//        self.locationManager.requestAlwaysAuthorization()
-        
-        self.notificationCenter = UNUserNotificationCenter.current()
-        notificationCenter?.delegate = self
-        
-//        let options: UNAuthorizationOptions = [.alert, .sound]
-//        notificationCenter?.requestAuthorization(options: options) { (granted, error) in
-//            if granted {
-//                self.notificationAuthorized = true
-//            }
-//        }
-        
+
+    /*
+    React Native functions
+   */
+
+    @ReactMethod
+    fun initNotification(pText: ReadableMap) {
+        val pChannel = pText.getMap("channel")
+        notifyChannelString[0] = pChannel!!.getString("title")
+        notifyChannelString[1] = pChannel.getString("description")
+        val pStart = pText.getMap("start")
+        if (pStart!!.getBoolean("notify")) {
+            notifyStart = true
+            notifyStartString[0] = pStart.getString("title")
+            notifyStartString[1] = pStart.getString("description")
+        }
+        val pStop = pText.getMap("stop")
+        if (pStop!!.getBoolean("notify")) {
+            notifyStop = true
+            notifyStopString[0] = pStop.getString("title")
+            notifyStopString[1] = pStop.getString("description")
+        }
+        val pEnter = pText.getMap("enter")
+        if (pEnter!!.getBoolean("notify")) {
+            notifyEnter = true
+            notifyEnterString[0] = pEnter.getString("title")
+            notifyEnterString[1] = pEnter.getString("description")
+        }
+        val pExit = pText.getMap("exit")
+        if (pExit!!.getBoolean("notify")) {
+            notifyExit = true
+            notifyExitString[0] = pExit.getString("title")
+            notifyExitString[1] = pExit.getString("description")
+        }
     }
-    
-    
-    
-    
-    
-    
-    //MARK: -  Public Interface
-    
-    @objc(initNotification:)
-    func initNotification(settings:NSDictionary) -> Void {
-        
-        DispatchQueue.main.async {
-            
-            self.allwaysInit()
-            
-            self.notifyEnter = settings.value(forKeyPath: "enter.notify") as? Bool ?? false
-            self.notifyExit = settings.value(forKeyPath: "exit.notify") as? Bool ?? false
-            self.notifyStart = settings.value(forKeyPath: "start.notify") as? Bool ?? false
-            self.notifyStop = settings.value(forKeyPath: "stop.notify") as? Bool ?? false
-            
-            self.didEnterTitle = settings.value(forKeyPath: "enter.title") as? String ?? "Be careful!"
-            self.didEnterBody = settings.value(forKeyPath: "enter.description") as? String ?? "It may be dangerous in the area where you are currently staying."
-            self.didExitTitle = settings.value(forKeyPath: "exit.title") as? String ?? ""
-            self.didExitBody = settings.value(forKeyPath: "exit.description") as? String ?? ""
-            self.startTrackingTitle = settings.value(forKeyPath: "start.title") as? String ?? ""
-            self.startTrackingBody = settings.value(forKeyPath: "start.description") as? String ??  ""
-            self.stopTrackingTitle = settings.value(forKeyPath: "stop.title") as? String ?? ""
-            self.stopTrackingBody = settings.value(forKeyPath: "stop.description") as? String ??  ""
-            
-        }
-        
+
+    @ReactMethod
+    fun removeAllGeofences(promise: Promise) {
+        mGeofenceList.clear()
+        val requestIds = geofenceStorage.getAllIds().toMutableList()
+        stopMonitoring(requestIds, promise)
     }
-    
-    @objc(addGeofence:duration:)
-    func addGeofence(geofence:NSDictionary, duration:Int) -> Void {
-        guard let lat = geofence.value(forKey: "latitude") as? Double else {
-            return
-        }
-        
-        guard let lon = geofence.value(forKey: "longitude") as? Double else {
-            return
-        }
-        
-        guard let radius = geofence.value(forKey: "radius") as? Double else {
-            return
-        }
-        
-        guard let id = geofence.value(forKey: "key") as? String else {
-            return
-        }
-        
-        let geofenceRegionCenter = CLLocationCoordinate2D(
-            latitude: lat,
-            longitude: lon
-        )
-        
-        let geofenceRegion = CLCircularRegion(
-            center: geofenceRegionCenter,
-            radius: CLLocationDistance(radius),
-            identifier: id
-        )
-        
-        self.valueDic[id] = geofence
-        
-        geofenceRegion.notifyOnExit = true
-        geofenceRegion.notifyOnEntry = true
-        
-        
-        if !(duration <= 0) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(duration)) {
-                self.removeGeofence(geofenceKey: id)
+
+    @ReactMethod
+    fun removeGeofence(key: String) {
+        var index = -1
+        for (i in mGeofenceList.indices) {
+            if (mGeofenceList[i].requestId == key) {
+                index = i
             }
         }
-        
-        self.startMonitoring(geo: geofenceRegion);
-    }
-    
-    
-    @objc(addGeofences:duration:resolver:rejecter:)
-    func addGeofences(geofencesArray:NSArray,
-                      duration:Int,
-                      resolver resolve: @escaping RCTPromiseResolveBlock,
-                      rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
-        //add small geofences
-        for geofence in geofencesArray {
-            guard let geo = geofence as? NSDictionary else {
-                return
-            }
-            
-            self.addGeofence(geofence: geo, duration: 0)
+        if (index != -1) {
+            mGeofenceList.removeAt(index)
         }
-        resolve(true);
-        self.notificationCenter?.getNotificationSettings(completionHandler: { (settings) in
-            if settings.authorizationStatus == .denied {
-                print("Permission not granted")
-                self.notificationAuthorized = false
-            } else {
-                self.notificationAuthorized = true
-            }
-            
-            if !(self.locationAuthorized && self.notificationAuthorized) {
-                //                    reject("PERMISSION_DENIED", "Do not have permissions", nil)
-            } else {
-                
-            }
-        })
-    }
-    
-    @objc
-    func updateGeofences(geofencesArray: NSArray,
-                         duration:Int,
-                         resolver resolve: @escaping RCTPromiseResolveBlock,
-                         rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
-        
-        DispatchQueue.main.async {
-            
-            
-            self.removeAllGeofences(resolver: resolve, rejecter: reject)
-            
-            //add small geofences
-            for geofence in geofencesArray {
-                
-                guard let geo = geofence as? NSDictionary else {
-                    return
+
+        //Remove from Client as well
+        val item = ArrayList<String>()
+        item.add(key)
+        mGeofencingClient.removeGeofences(item)
+                .addOnSuccessListener {
+                    geofenceStorage.removeGeofence(key)
                 }
-                
-                self.addGeofence(geofence: geo, duration: duration)
-                
-            }
-            
-            self.startSilenceMonitoring()
-            
-        }
-        
     }
-    
-    
-    @objc(addMonitoringBorder:duration:)
-    func addMonitoringBorder(geofence:NSDictionary, duration:Int) -> Void {
-        
-        DispatchQueue.main.async {
-            
-            
-            //monitoring boarder (needs specific ID)
-            self.addGeofence(geofence: geofence, duration: duration)
+
+
+    @ReactMethod
+    fun addGeofences(
+            geofenceArray: ReadableArray,
+            duration: Int,
+            promise: Promise) {
+        //Add geohashes
+        for (i in 0 until geofenceArray.size()) {
+            val geofenceMap = geofenceArray.getMap(i)
+            buildGeofence(geofenceMap, duration)
+            //Start Monitoring
         }
-        
+        startMonitoring(promise)
     }
-    
-    
-    @objc(removeMonitoringBorder)
-    func removeMonitoringBorder() -> Void {
-        
-        DispatchQueue.main.async {
-            for geo in self.locationManager.monitoredRegions {
-                self.locationManager.stopMonitoring(for: geo);
-            }
+
+    private fun buildGeofence(geofenceObject: ReadableMap?, duration: Int): Geofence {
+        val geofence = Geofence.Builder()
+                .setRequestId(geofenceObject!!.getString("key"))
+                .setCircularRegion(
+                        geofenceObject.getDouble("latitude"),
+                        geofenceObject.getDouble("longitude"),
+                        geofenceObject.getInt("radius").toFloat()
+                )
+                .setExpirationDuration(duration.toLong())
+                .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT)
+                .setNotificationResponsiveness(5 * 60 * 1000)
+                .build()
+        geofenceStorage.addGeofence(geofence.requestId)
+        mGeofenceList.add(geofence)
+
+        if (geofenceObject.hasKey("value")) {
+            geofenceKeys.add(geofenceObject.getString("key") ?: "")
+            geofenceValues.add(geofenceObject.getString("value") ?: "")
         }
+        mDuration = duration
+        return geofence
     }
-    
-    
-    @objc(removeAllGeofences:rejecter:)
-    func removeAllGeofences(resolver resolve: @escaping RCTPromiseResolveBlock,
-                            rejecter reject: @escaping RCTPromiseRejectBlock) -> Void {
-        for geo in self.locationManager.monitoredRegions {
-            self.valueDic[geo.identifier] = nil
-            self.locationManager.stopMonitoring(for: geo)
-        }
-        
-        if self.notifyStop {
-            self.notifyStart(started: false)
-        }
-        resolve(true)
+
+    @ReactMethod
+    fun addGeofence(geofenceObject: ReadableMap, duration: Int, promise: Promise) {
+        buildGeofence(geofenceObject, duration)
+        Log.i(TAG, "Added geofence: Lat " + geofenceObject.getDouble("latitude") + " Long " + geofenceObject.getDouble("longitude"))
+        startMonitoring(promise)
     }
-    
-    
-    @objc(removeGeofence:)
-    func removeGeofence(geofenceKey:String) -> Void {
-        for geo in self.locationManager.monitoredRegions {
-            if geo.identifier == geofenceKey {
-                self.valueDic[geo.identifier] = nil
-                self.locationManager.stopMonitoring(for: geo)
-            }
-        }
-    }
-    
-    
-    @objc(startMonitoring:)
-    func startMonitoring(geo: CLCircularRegion) -> Void {
-        // Make sure the app is authorized.
-        let status = CLLocationManager.authorizationStatus();
-        if status == .authorizedAlways || status == .authorizedWhenInUse {
-            // Make sure region monitoring is supported.
-            if CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) {
-                self.locationManager.startMonitoring(for: geo)
-                
-                if self.notifyStart {
-                    self.notifyStart(started: true)
+
+    @SuppressLint("MissingPermission")
+    @ReactMethod
+    fun startMonitoring(promise: Promise) {
+        mLocalBroadcastManager.unregisterReceiver(mLocalBroadcastReceiver)
+        mGeofencingClient.addGeofences(getGeofencingRequest(), geofencePendingIntent)
+                .addOnSuccessListener {
+                    Log.i(TAG, "Added Geofences")
+                    notifyNow("start")
+                    mStartTime = System.currentTimeMillis()
+                    mLocalBroadcastManager.registerReceiver(
+                            mLocalBroadcastReceiver, IntentFilter("monitorGeofence"))
+
+                    //Launch service to notify after timeout
+                    if (notifyStop == true) {
+                        val notificationIntent = Intent(reactContext, ShowTimeoutNotification::class.java)
+                        notificationIntent.putExtra("notifyChannelStringTitle", notifyChannelString[0])
+                        notificationIntent.putExtra("notifyChannelStringDescription", notifyChannelString[1])
+                        notificationIntent.putExtra("notifyStringTitle", notifyStopString[0])
+                        notificationIntent.putExtra("notifyStringDescription", notifyStopString[1])
+
+                        val contentIntent = PendingIntent.getService(reactContext, 0, notificationIntent,
+                                PendingIntent.FLAG_CANCEL_CURRENT)
+
+                        val am = reactContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                        am.cancel(contentIntent)
+                        if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + mDuration, contentIntent)
+                        } else {
+                            am.setExact(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + mDuration, contentIntent)
+                        }
+
+                    }
+                    promise.resolve(true)
                 }
+                .addOnFailureListener { e ->
+                    promise.reject(e)
+                    Log.e(TAG, "Adding Geofences: " + e.message)
+                }
+        //}
+
+    }
+
+//    @SuppressLint("MissingPermission")
+//    fun silentStartMonitoring() {
+//        //Context removed by Listeners
+//        //if (ContextCompat.checkSelfPermission(this.reactContext, Manifest.permission.ACCESS_FINE_LOCATION)
+//        //        != PackageManager.PERMISSION_GRANTED){
+//        mGeofencingClient.addGeofences(geofencingRequest, geofencePendingIntent)
+//                .addOnSuccessListener { Log.i(TAG, "Updated Geofences") }
+//                .addOnFailureListener { e ->
+//                    Log.e(TAG, "Updating Geofences: " + e.message)
+//                    e.printStackTrace()
+//                }
+//        //}
+//
+//    }
+
+    private fun stopMonitoring(requestIds: List<String>, promise: Promise) {
+        //Context removed by Listeners
+        mGeofencingClient.removeGeofences(requestIds)
+                .addOnSuccessListener {
+                    Log.i(TAG, "Removed Geofences")
+                    geofenceStorage.removeAll()
+                    notifyNow("stop")
+                    mLocalBroadcastManager.unregisterReceiver(mLocalBroadcastReceiver)
+                    if (notifyStop == true) {
+                        val notificationIntent = Intent(reactContext, ShowTimeoutNotification::class.java)
+                        notificationIntent.putExtra("notifyChannelStringTitle", notifyChannelString[0])
+                        notificationIntent.putExtra("notifyChannelStringDescription", notifyChannelString[1])
+                        notificationIntent.putExtra("notifyStringTitle", notifyStopString[0])
+                        notificationIntent.putExtra("notifyStringDescription", notifyStopString[1])
+
+                        val contentIntent = PendingIntent.getService(reactContext, 0, notificationIntent,
+                                PendingIntent.FLAG_CANCEL_CURRENT)
+
+                        val am = reactContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                        am.cancel(contentIntent)
+                    }
+                    promise.resolve(true)
+                }
+                .addOnFailureListener { e ->
+                    Log.e(TAG, "Removing Geofences: " + e.message)
+                    promise.reject(e);
+                }
+    }
+
+    @ReactMethod
+    fun testNotify() {
+        Log.i(TAG, "TestNotify Callback worked")
+        postNotification("TestNotify", "Callback worked", false)
+    }
+
+    /*
+         Notifications
+      */
+    private fun notifyNow(action: String) {
+        if (action === "start") {
+            if (notifyStart == true) {
+                postNotification(notifyStartString[0] ?: "", notifyStartString[1] ?: "", true)
+            }
+        }
+        if (action === "stop") {
+            if (notifyStop == true) {
+                postNotification(notifyStopString[0] ?: "", notifyStopString[1] ?: "", false)
             }
         }
     }
-    
-    
-    @objc(stopMonitoring)
-    func stopMonitoring() -> Void {
-        
-        DispatchQueue.main.async {
-            for geo in self.locationManager.monitoredRegions {
-                self.locationManager.stopMonitoring(for: geo)
-            }
-            
-            if self.notifyStop {
-                self.notifyStart(started: false)
-            }
+
+    private fun getNotificationBuilder(title: String, content: String): NotificationCompat.Builder {
+        //Onclick
+        val intent = Intent(reactApplicationContext, this.currentActivity!!.javaClass)
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        val contentIntent = PendingIntent.getActivity(this.reactContext, 0, intent, 0)
+        //Intent intent = new Intent(this.getReactApplicationContext(), NotificationEventReceiver.class);
+        //PendingIntent contentIntent = PendingIntent.getBroadcast(this.getReactApplicationContext(), NOTIFICATION_ID_STOP, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        //Build notification
+        val notification = NotificationCompat.Builder(this.reactContext, CHANNEL_ID)
+                .setContentTitle(title)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+                .setContentText(content)
+                .setSmallIcon(reactApplicationContext.applicationInfo.icon)
+                .setContentIntent(contentIntent)
+        // Create the NotificationChannel, but only on API 26+ because
+        // the NotificationChannel class is new and not in the support library
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && channel == null) {
+            val name = notifyChannelString[0]
+            val description = notifyChannelString[1]
+            val importance = NotificationManager.IMPORTANCE_DEFAULT
+            val channel = NotificationChannel(CHANNEL_ID, name, importance)
+            channel.description = description
+            // Register the channel with the system; you can't change the importance
+            // or other notification behaviors after this
+            val notificationManager = this.reactContext.getSystemService(NotificationManager::class.java)
+            notificationManager!!.createNotificationChannel(channel)
+            notification.setChannelId(CHANNEL_ID)
+        }
+        return notification
+    }
+
+    fun postNotification(title: String, content: String, start: Boolean) {
+        val notificationManager = NotificationManagerCompat.from(this.reactContext)
+
+        var notifyID = NOTIFICATION_ID_STOP
+        if (start == true) {
+            notifyID = NOTIFICATION_ID_START
+        }
+        notificationManager.notify(NOTIFICATION_TAG, notifyID, getNotificationBuilder(title, content).build())
+    }
+
+    /*
+    private static int getNextNotifId(Context context) {
+      SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
+      int id = sharedPreferences.getInt(PREFERENCE_LAST_NOTIF_ID, 0) + 1;
+      if (id == Integer.MAX_VALUE) { id = 0; }
+      sharedPreferences.edit().putInt(PREFERENCE_LAST_NOTIF_ID, id).apply();
+      return id;
+    }
+    */
+    //BroadcastReceiver
+    inner class LocalBroadcastReceiver : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val duration = intent.getIntExtra("duration", 3000)
+            val startTime = intent.getLongExtra("startTime", System.currentTimeMillis())
+            val remainingTime = 0//toIntExact(duration-(currentTime-startTime));
+            val id = intent.getStringExtra("id")
+            val event = intent.getStringExtra("event")
+            Log.i(TAG, "Broadcast received")
+            Log.i(TAG, "RemainingTimeReceiver: $remainingTime")
+            val serviceIntent = Intent(context, MonitorUpdateService::class.java)
+            serviceIntent.putExtra("remainingTime", remainingTime)
+            serviceIntent.putExtra("duration", duration)
+            serviceIntent.putExtra("startTime", startTime)
+            serviceIntent.putExtra("id", id)
+            serviceIntent.putExtra("event", event)
+            context.startService(serviceIntent)
+            HeadlessJsTaskService.acquireWakeLockNow(context)
         }
     }
-    
-    func stopMonitoring(id: String) {
-        for region in locationManager.monitoredRegions {
-            guard let circularRegion = region as? CLCircularRegion,
-                circularRegion.identifier == id else { continue }
-            locationManager.stopMonitoring(for: circularRegion)
-        }
+
+    companion object {
+        private val PREFERENCE_LAST_NOTIF_ID = "PREFERENCE_LAST_NOTIF_ID"
+        private val NOTIFICATION_TAG = "GeofenceNotification"
+        private val NOTIFICATION_ID_START = 1
+        private val NOTIFICATION_ID_STOP = 150
     }
-    
-    
-    
-    
-    //MARK: - helpe
-    
-    func startSilenceMonitoring() -> Void {
-        DispatchQueue.main.async {
-            for geo in self.locationManager.monitoredRegions {
-                self.locationManager.startMonitoring(for: geo)
-            }
-        }
-    }
-    
-    //MARK: - Setup Notifications
-    
-    private func handleEvent(region: CLRegion!, didEnter: Bool) {
-        if didEnter {
-            let body : [String: Any] = [
-                "id": region!.identifier as String,
-                "event": "didEnter"
-            ]
-            
-            self.sendEvent(withName: "monitorGeofence", body: body )
-        } else {
-            let body : [String: Any] = [
-                "id": region.identifier as String,
-                "event": "didExit"
-            ]
-            self.sendEvent(withName: "monitorGeofence", body: body )
-        }
-    
-        if (didEnter && !self.notifyEnter) || (!didEnter && !self.notifyExit) {
-            return
-        }
-        let content = UNMutableNotificationContent()
-        content.sound = UNNotificationSound.default
-        
-        
-        if self.didEnterBody.contains("[value]") {
-            if let geofence = self.valueDic[region.identifier] {
-                let value = geofence["value"] as? String ?? "SoThuTu";
-                self.didEnterBody = self.didEnterBody.replacingOccurrences(of: "[value]", with: value, options: NSString.CompareOptions.literal, range:nil)
-            }
-        }
-        
-        if self.didExitBody.contains("[value]") {
-            if let geofence = self.valueDic[region.identifier] {
-                let value = geofence["value"] as? String ?? "SoThuTu";
-                self.didExitBody = self.didExitBody.replacingOccurrences(of: "[value]", with: value, options: NSString.CompareOptions.literal, range:nil)
-            }
-        }
-        
-        var identifier = ""
-        
-        if didEnter {
-            content.title = self.didEnterTitle
-            content.body = self.didEnterBody
-            identifier = "enter: \(region.identifier)"
-        }else{
-            content.title = self.didExitTitle
-            content.body = self.didExitBody
-            identifier = "exit: \(region.identifier)"
-        }
-        
-        
-        let timeInSeconds: TimeInterval = 0.1
-        
-        let trigger = UNTimeIntervalNotificationTrigger(
-            timeInterval: timeInSeconds,
-            repeats: false
-        )
-        
-        
-        let request = UNNotificationRequest(
-            identifier: identifier,
-            content: content,
-            trigger: trigger
-        )
-        
-        notificationCenter?.add(request, withCompletionHandler: { (error) in
-            if error != nil {
-                print("Error adding notification with identifier: \(identifier)")
-            }
-        })
-        
-        
-        if !didEnter {
-            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(10)) {
-                self.notificationCenter?.removeDeliveredNotifications(withIdentifiers: ["enter: \(region.identifier)","exit: \(region.identifier)"])
-                
-            }
-        }
-    }
-    
-    
-    private func notifyStart(started: Bool) {
-        
-        let content = UNMutableNotificationContent()
-        content.sound = UNNotificationSound.default
-        
-        
-        if started {
-            content.title = self.startTrackingTitle
-            content.body = self.startTrackingBody
-        }else{
-            content.title = self.stopTrackingTitle
-            content.body = self.startTrackingBody
-        }
-        
-        
-        let timeInSeconds: TimeInterval = 0.1
-        
-        let trigger = UNTimeIntervalNotificationTrigger(
-            timeInterval: timeInSeconds,
-            repeats: false
-        )
-        
-        let identifier = self.randomString(length: 20)
-        
-        let request = UNNotificationRequest(
-            identifier: identifier,
-            content: content,
-            trigger: trigger
-        )
-        
-        notificationCenter?.add(request, withCompletionHandler: { (error) in
-            if error != nil {
-                print("Error adding notification with identifier: \(identifier)")
-            }
-        })
-    }
-    
-    
-    
-    
-    //MARK: - Location Delegate Methodes
-    
-    func locationManager(_ manager: CLLocationManager, didStartMonitoringFor region: CLRegion) {
-        print("BM didStartMonitoringForRegion")
-        locationManager.requestState(for: region) // should locationManager be manager?
-    }
-    
-    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
-        if region is CLCircularRegion {
-            self.handleEvent(region:region, didEnter: true)
-        }
-    }
-    
-    func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
-        if region is CLCircularRegion {
-            self.handleEvent(region:region, didEnter: false)
-        }
-    }
-    
-    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        if status == .denied {
-            print("Geofence will not Work, because of missing Authorization")
-            locationAuthorized = false
-        }else{
-            locationAuthorized = true
-        }
-    }
-    
-    func locationManager(_ manager: CLLocationManager, didDetermineState state: CLRegionState, for region: CLRegion) {
-        print("BM didDetermineState \(state)");
-        switch state {
-        case .inside:
-            print("BeaconManager:didDetermineState CLRegionState.Inside \(region.identifier)");
-            self.handleEvent(region: region, didEnter: true)
-        case .outside:
-            print("BeaconManager:didDetermineState CLRegionState.Outside");
-        case .unknown:
-            print("BeaconManager:didDetermineState CLRegionState.Unknown");
-        default:
-            print("BeaconManager:didDetermineState default");
-        }
-    }
-    
-    
-    
-    //MARK: - Notification Delegate Methodes
-    
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        // when app is onpen and in foregroud
-        completionHandler(.alert)
-    }
-    
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        
-        // get the notification identifier to respond accordingly
-        let identifier = response.notification.request.identifier
-        
-        // do what you need to do
-        print(identifier)
-        // ...
-    }
-    
-    
-    
-    
-    
-    //MARK: - helper Functions
-    
-    func randomString(length: Int) -> String {
-        let letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        return String((0...length-1).map{ _ in letters.randomElement()! })
-    }
-    
-    
+
 }
